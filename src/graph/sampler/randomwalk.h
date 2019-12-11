@@ -75,6 +75,15 @@ RandomWalkTracesPtr RandomWalkWithRestart(
     uint64_t max_visit_counts,
     uint64_t max_frequent_visited_nodes);
 
+
+RandomWalkTracesPtr DeepInfRandomWalkWithRestart(
+    const GraphInterface *gptr,
+    IdArray seeds,
+    double restart_prob,
+    uint64_t num_traces,
+    uint64_t num_hops,
+    uint64_t num_unique);
+
 /*
  * \brief Batch-generate random walk traces with restart on a bipartite graph, walking two
  * hops at a time.

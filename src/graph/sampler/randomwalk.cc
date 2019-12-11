@@ -14,6 +14,7 @@
 #include <numeric>
 #include <functional>
 #include <vector>
+#include <unordered_set>
 #include "randomwalk.h"
 #include "../../c_api_common.h"
 
@@ -172,6 +173,81 @@ RandomWalkTracesPtr GenericRandomWalkWithRestart(
   return RandomWalkTracesPtr(traces);
 }
 
+RandomWalkTracesPtr GenericDeepInfRandomWalkWithRestart(
+    const GraphInterface *gptr,
+    IdArray seeds,
+    double restart_prob,
+    uint64_t num_traces,
+    uint64_t num_hops,
+    uint64_t num_unique,
+    Walker walker) {
+  std::vector<dgl_id_t> vertices;
+  std::vector<size_t> trace_lengths;
+  std::unordered_set<dgl_id_t> visited;
+
+  const int64_t num_nodes = seeds->shape[0];
+  const dgl_id_t *seed_ids = static_cast<dgl_id_t *>(seeds->data);
+
+  // FIXME: does OpenMP work with exceptions?  Especially without throwing SIGABRT?
+  dgl_id_t next;
+
+  for (int64_t i = 0; i < num_nodes; ++i) {
+    const dgl_id_t seed_id = seed_ids[i];
+
+    for (int j = 0; j < num_traces; ++j) {
+      dgl_id_t cur = seed_id;
+      const int kmax = num_hops + 1;
+      visited.clear();
+      visited.insert(cur);
+      vertices.push_back(cur);
+
+      for (int k = 0; k < kmax; ++k) {
+        if ((cur != seed_id) &&
+            (RandomEngine::ThreadLocal()->Uniform<double>() < restart_prob)) {
+          cur = seed_id;
+        }
+        if ((next = walker(gptr, cur)) == DGL_INVALID_ID)
+          LOG(FATAL) << "no successors from vertex " << cur;
+        cur = next;
+        if (visited.find(cur) == visited.end()) {
+            visited.insert(cur);
+            vertices.push_back(cur);
+            if (visited.size() == num_unique) {
+              break;
+            }
+        }
+      }
+
+      trace_lengths.push_back(visited.size());
+    }
+  }
+
+  RandomWalkTraces *traces = new RandomWalkTraces;
+  traces->trace_counts = IdArray::Empty(
+      {static_cast<int64_t>(num_nodes)},
+      DLDataType{kDLInt, 64, 1},
+      DLContext{kDLCPU, 0});
+  traces->trace_lengths = IdArray::Empty(
+      {static_cast<int64_t>(trace_lengths.size())},
+      DLDataType{kDLInt, 64, 1},
+      DLContext{kDLCPU, 0});
+  traces->vertices = IdArray::Empty(
+      {static_cast<int64_t>(vertices.size())},
+      DLDataType{kDLInt, 64, 1},
+      DLContext{kDLCPU, 0});
+
+  dgl_id_t *trace_counts_data = static_cast<dgl_id_t *>(traces->trace_counts->data);
+  dgl_id_t *trace_lengths_data = static_cast<dgl_id_t *>(traces->trace_lengths->data);
+  dgl_id_t *vertices_data = static_cast<dgl_id_t *>(traces->vertices->data);
+
+  std::fill_n(trace_counts_data, num_nodes, num_traces);
+  std::copy(trace_lengths.begin(), trace_lengths.end(), trace_lengths_data);
+  std::copy(vertices.begin(), vertices.end(), vertices_data);
+
+  return RandomWalkTracesPtr(traces);
+
+}
+
 };  // namespace
 
 IdArray RandomWalk(
@@ -192,6 +268,17 @@ RandomWalkTracesPtr RandomWalkWithRestart(
   return GenericRandomWalkWithRestart(
       gptr, seeds, restart_prob, visit_threshold_per_seed, max_visit_counts,
       max_frequent_visited_nodes, WalkMultipleHops<1>);
+}
+
+RandomWalkTracesPtr DeepInfRandomWalkWithRestart(
+    const GraphInterface *gptr,
+    IdArray seeds,
+    double restart_prob,
+    uint64_t num_traces,
+    uint64_t num_hops,
+    uint64_t num_unique) {
+  return GenericDeepInfRandomWalkWithRestart(
+      gptr, seeds, restart_prob, num_traces, num_hops, num_unique, WalkMultipleHops<1>);
 }
 
 RandomWalkTracesPtr BipartiteSingleSidedRandomWalkWithRestart(
@@ -228,6 +315,20 @@ DGL_REGISTER_GLOBAL("sampler.randomwalk._CAPI_DGLRandomWalkWithRestart")
     *rv = RandomWalkTracesRef(
         RandomWalkWithRestart(g.sptr().get(), seeds, restart_prob, visit_threshold_per_seed,
           max_visit_counts, max_frequent_visited_nodes));
+  });
+
+DGL_REGISTER_GLOBAL("sampler.randomwalk._CAPI_DGLDeepInfRandomWalkWithRestart")
+.set_body([] (DGLArgs args, DGLRetValue* rv) {
+    GraphRef g = args[0];
+    const IdArray seeds = args[1];
+    const double restart_prob = args[2];
+    const uint64_t num_traces = args[3];
+    const uint64_t num_hops = args[4];
+    const uint64_t num_unique = args[5];
+
+    *rv = RandomWalkTracesRef(
+        DeepInfRandomWalkWithRestart(g.sptr().get(), seeds, restart_prob, num_traces,
+          num_hops, num_unique));
   });
 
 DGL_REGISTER_GLOBAL("sampler.randomwalk._CAPI_DGLBipartiteSingleSidedRandomWalkWithRestart")

@@ -8,6 +8,7 @@ from ... import ndarray
 
 __all__ = ['random_walk',
            'random_walk_with_restart',
+           'deepinf_random_walk_with_restart',
            'bipartite_single_sided_random_walk_with_restart',
            'metapath_random_walk',
            ]
@@ -72,6 +73,50 @@ def _split_traces(traces):
         s += c
 
     return results
+
+
+def deepinf_random_walk_with_restart(
+        g, seeds, restart_prob, num_traces,
+        num_hops, num_unique):
+    """Batch-generate random walk traces on given graph with restart probability.
+
+    Parameters
+    ----------
+    g : DGLGraph
+        The graph.
+    seeds : Tensor
+        The node ID tensor from which the random walk traces starts.
+    restart_prob : float
+        Probability to stop a random walk after each step.
+    num_traces: int
+        Stop generating traces for a seed if the total number of nodes
+        visited exceeds this number. [1]
+    num_hops : int, optional
+    num_unique : int, optional
+        Alternatively, stop generating traces for a seed if no less than
+        ``max_frequent_visited_nodes`` are visited no less than
+        ``max_visit_counts`` times.  [1]
+
+    Returns
+    -------
+    traces : list[list[Tensor]]
+        traces[i][j] is the j-th trace generated for i-th seed.
+
+    Notes
+    -----
+    The traces does **not** include the seed nodes themselves.
+
+    Reference
+    ---------
+    [1] Eksombatchai et al., 2017 https://arxiv.org/abs/1711.07601
+    """
+    if len(seeds) == 0:
+        return []
+    seeds = utils.toindex(seeds).todgltensor()
+    traces = _CAPI_DGLDeepInfRandomWalkWithRestart(
+            g._graph, seeds, restart_prob, int(num_traces),
+            int(num_hops), int(num_unique))
+    return _split_traces(traces)
 
 
 def random_walk_with_restart(
