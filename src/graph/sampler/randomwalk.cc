@@ -207,7 +207,10 @@ RandomWalkTracesPtr GenericDeepInfRandomWalkWithRestart(
           cur = seed_id;
         }
         if ((next = walker(gptr, cur)) == DGL_INVALID_ID)
-          LOG(FATAL) << "no successors from vertex " << cur;
+        {
+          // LOG(FATAL) << "no successors from vertex " << cur;
+          next = seed_id;
+        }
         cur = next;
         if (visited.find(cur) == visited.end()) {
             visited.insert(cur);
